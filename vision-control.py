@@ -11,6 +11,10 @@ MULTIPLICADOR_RANGO = 0.5   # Factor para determinar "mano cerrada"
 LIMITE_PENDIENTE = 0.5      # Valor máximo que puede tener la pendiente (tanto positiva como negativa)
 DEADZONE_STICK = 6000       # Deadzone del stick, si el calculo con la pendiente da un valor menor que este se reemplaza por 0
 
+# Lista donde se colocan los puntos para los cuales se obtienen las coordenadas
+# Evitamos calcular las coordenadas de los 21 posibles landmarks
+puntos_utilizados = [PUNTO_INICIAL, PUNTO_FINAL]
+
 maximaDistancia = -1
 minimaDistancia = -1
 
@@ -26,7 +30,8 @@ def calcular_distancia(punto_1, punto_2):
 
 # Calculamos la pendiente de la recta que se forma al unir dos puntos
 def calcular_pendiente(punto_1, punto_2):
-    return (punto_2[1] - punto_1[1])/(punto_2[0] - punto_1[0])
+    # Verificamos no estar dividiendo por cero si por alguna razón las muñecas tienen la misma coordenada en X
+    return (punto_2[1] - punto_1[1])/(punto_2[0] - punto_1[0]) if((punto_2[0] - punto_1[0]) != 0) else 0
 
 # Limitamos el valor de la pendiente
 def limitar_pendiente(pendiente):
@@ -85,16 +90,16 @@ while True:
 
     # Calculamos todo en función del último frame procesado
     # Verificamos que se hayan detectado las dos manos para entrar en el ciclo
-    if ultimo_resultado and ultimo_resultado.hand_landmarks and len(ultimo_resultado.hand_landmarks) == 2:
+    if ultimo_resultado and len(ultimo_resultado.hand_landmarks) == 2:
         # Creamos un diccionario para usar a la hora de controlar el joystick, cada ciclo se reinicia para poder actuar solo cuando tenemos las dos manos
         manos_detectadas = {}
 
         # Ejecutamos una vez por cada mano
         for nro_mano, hand in enumerate(ultimo_resultado.hand_landmarks):
-            # Guardamos los 21 puntos de referencia para cada mano que procesa la red
+            # Guardamos las coordenadas de los puntos de referencia que definimos al inicio del programa
             puntos_referencia = {
                 i: (int(hand[i].x * imagen_ancho), int(hand[i].y * imagen_alto))
-                for i in range(21)
+                for i in puntos_utilizados
             }
 
             # Dibujar línea entre la muñeca y el pulgar
