@@ -7,7 +7,7 @@ from mediapipe.tasks.python import vision
 
 PUNTO_INICIAL = 0           # 0 = Muñeca
 PUNTO_FINAL = 12            # 12 = Dedo mayor
-MULTIPLICADOR_RANGO = 0.5   # Factor para determinar "mano cerrada"
+UMBRAL_MANO_CERRADA = -0.02 # Factor para determinar si la mano está cerrada o no
 LIMITE_PENDIENTE = 0.5      # Valor máximo que puede tener la pendiente (tanto positiva como negativa)
 DEADZONE_STICK = 6000       # Deadzone del stick, si el calculo con la pendiente da un valor menor que este se reemplaza por 0
 
@@ -90,31 +90,38 @@ while True:
 
     # Calculamos todo en función del último frame procesado
     # Verificamos que se hayan detectado las dos manos para entrar en el ciclo
-    if ultimo_resultado and len(ultimo_resultado.hand_landmarks) == 2:
+    # Podemos elegir entre 'hand_landmarks' o 'hand_world_landmarks', el primero nos da las coordenadas en la imagen y el otro la distancia en metros hacia el centro de la mano
+    if ultimo_resultado and len(ultimo_resultado.hand_landmarks) == 2 and len(ultimo_resultado.hand_world_landmarks) == 2:
         # Creamos un diccionario para usar a la hora de controlar el joystick, cada ciclo se reinicia para poder actuar solo cuando tenemos las dos manos
         manos_detectadas = {}
 
         # Ejecutamos una vez por cada mano
-        for nro_mano, hand in enumerate(ultimo_resultado.hand_landmarks):
+        for nro_mano, (mano_2d, mano_3d) in enumerate(zip(ultimo_resultado.hand_landmarks, ultimo_resultado.hand_world_landmarks)):
             # Guardamos las coordenadas de los puntos de referencia que definimos al inicio del programa
             puntos_referencia = {
-                i: (int(hand[i].x * imagen_ancho), int(hand[i].y * imagen_alto))
+                i: (int(mano_2d[i].x * imagen_ancho), int(mano_2d[i].y * imagen_alto))
                 for i in puntos_utilizados
             }
 
+            # Determinamos si la mano está cerrada en función de la distancia del dedo mayor en referencia al centro de la mano
+            # El modelo devuelve la distancia en metros, por lo tanto funciona sin importar a que distancia estamos de la cámara
+            mano_cerrada = mano_3d[PUNTO_FINAL].y > UMBRAL_MANO_CERRADA
+
+            mano_etiqueta = "Izquierda" if nro_mano == 1 else "Derecha"
+            estado = "CERRADA" if mano_cerrada else "ABIERTA"
+            
+            # Guardamos las coordenadas de la muñeca y si la mano está cerrada o no
+            manos_detectadas[mano_etiqueta] = {'pos': puntos_referencia[PUNTO_INICIAL], 'cerrada': mano_cerrada}
+
+            # Escribimos el texto en el frame
+            cv2.putText(frame, f"{mano_etiqueta}: {estado}", (puntos_referencia[PUNTO_INICIAL][0], puntos_referencia[PUNTO_INICIAL][1] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+
+            # A partir de este punto todo es completamente estéticos, no se utilizan para calcular nada
             # Dibujar línea entre la muñeca y el pulgar
             cv2.line(frame, puntos_referencia[PUNTO_INICIAL], puntos_referencia[PUNTO_FINAL], (0, 255, 255), 2)
 
             # Calculamos la distancia entre ambos puntos
             distancia = int(calcular_distancia(puntos_referencia[PUNTO_INICIAL], puntos_referencia[PUNTO_FINAL]))
-
-            # ESTE MÉTODO PARA CALCULAR FUNCIONA BIEN SI NOS ACERCAMOS PERO NO SI NOS ALEJAMOS, REVISAR
-            # Si la distancia es mayor que el máximo registrado lo guardamos en la variable
-            if (distancia > maximaDistancia) or (maximaDistancia == -1):
-                maximaDistancia = distancia
-            # Si la distancia es menor que el mínimo registrado lo guardamos en la variable
-            elif (distancia < minimaDistancia) or (minimaDistancia == -1):
-                minimaDistancia = distancia
 
             cv2.putText(frame, f"{distancia}px",
                         ((puntos_referencia[PUNTO_INICIAL][0] + puntos_referencia[PUNTO_FINAL][0]) // 2,
@@ -123,20 +130,6 @@ while True:
 
             cv2.circle(frame, puntos_referencia[PUNTO_INICIAL], 8, (255, 0, 0), -1)
             cv2.circle(frame, puntos_referencia[PUNTO_FINAL], 8, (0, 255, 0), -1)
-
-            # Determinamos si la mano está cerrada en función de las distancias máximas y mínimas registradas
-            # Mano cerrada si el índice está cerca de la muñeca
-            rango = maximaDistancia - minimaDistancia
-            mano_cerrada = distancia < minimaDistancia + (MULTIPLICADOR_RANGO * rango)
-
-            mano_etiqueta = "Izquierda" if nro_mano == 0 else "Derecha"
-            estado = "CERRADA" if mano_cerrada else "ABIERTA"
-            
-            # Guardamos las coordenadas de la muñeca y si la mano está cerrada o no
-            manos_detectadas[mano_etiqueta] = {'pos': puntos_referencia[PUNTO_INICIAL], 'cerrada': mano_cerrada}
-
-            # Escribimos el texto en el frame
-            cv2.putText(frame, f"{mano_etiqueta}: {estado}", (puntos_referencia[PUNTO_INICIAL][0], puntos_referencia[PUNTO_INICIAL][1] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)   
                 
             
         # Control de joystick
@@ -185,7 +178,7 @@ while True:
     gamepad.update()
 
     # Mostramos el frame
-    cv2.imshow("Volante Visión Artificial", frame)
+    cv2.imshow("Volante Vision Artificial", frame)
     
     # Salimos con la tecla ESC
     if cv2.waitKey(1) & 0xFF == 27:
