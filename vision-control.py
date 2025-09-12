@@ -1,140 +1,189 @@
 import cv2
-import mediapipe as mp
 import math
 import vgamepad as vg
+import mediapipe as mp
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
 
 PUNTO_INICIAL = 0           # 0 = Muñeca
 PUNTO_FINAL = 12            # 12 = Dedo mayor
-MULTIPLICADOR_RANGO = 0.5   # A partir de que punto del rango total de movimiento consideramos que la mano está cerrada
+MULTIPLICADOR_RANGO = 0.5   # Factor para determinar "mano cerrada"
+LIMITE_PENDIENTE = 0.5      # Valor máximo que puede tener la pendiente (tanto positiva como negativa)
+DEADZONE_STICK = 6000       # Deadzone del stick, si el calculo con la pendiente da un valor menor que este se reemplaza por 0
 
-maximaDistancia = 0
-minimaDistancia = 1000
+maximaDistancia = -1
+minimaDistancia = -1
 
-# Inicializar gamepad virtual - Emulamos un joystick de Xbox 360
+# Inicializar gamepad virtual
 gamepad = vg.VX360Gamepad()
 
-# Inicializar mediapipe
-mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(static_image_mode = False, max_num_hands=2, min_detection_confidence = 0.7, min_tracking_confidence = 0.5)
-
-cap = cv2.VideoCapture(0)
-
-# Función que se utiliza para limitar el ángulo que se forma con las manos
-def limitar(valor, minimo, maximo):
-    return max(minimo, min(maximo, valor))
+# Variable global donde se guarda el último frame procesado
+ultimo_resultado = None
 
 # Medimos la distancia entre dos puntos
-def distancia(p1, p2):
-    return math.hypot(p2[0] - p1[0], p2[1] - p1[1])
+def calcular_distancia(punto_1, punto_2):
+    return math.hypot(punto_2[0] - punto_1[0], punto_2[1] - punto_1[1])
 
-# Ciclo principal
+# Calculamos la pendiente de la recta que se forma al unir dos puntos
+def calcular_pendiente(punto_1, punto_2):
+    return (punto_2[1] - punto_1[1])/(punto_2[0] - punto_1[0])
+
+# Limitamos el valor de la pendiente
+def limitar_pendiente(pendiente):
+    return max(pendiente, -LIMITE_PENDIENTE) if (pendiente < 0) else min(pendiente, LIMITE_PENDIENTE)
+
+# Callback que recibe los resultados del procesamiento de las imágenes
+# Devuelve el resultado, la imagen original y el timestamp de la imagen original
+# Guardamos el resultado en la variable 'ultimo_resultado' para usarlo en el loop principal
+def callback(result, output_image, timestamp_ms):
+    global ultimo_resultado
+    ultimo_resultado = result
+
+# === Configuración de Mediapipe ===
+base_options = python.BaseOptions(
+    model_asset_path="hand_landmarker.task"
+    #delegate=python.BaseOptions.Delegate.GPU   # Forzamos a que el modelo de Mediapipe corra en la GPU (Solo soportado en Linux por ahora)
+)
+
+options = vision.HandLandmarkerOptions(
+    base_options = base_options,
+    running_mode = mp.tasks.vision.RunningMode.LIVE_STREAM, # Configuramos modo de video en vivo
+    num_hands = 2,
+    min_hand_detection_confidence = 0.5,
+    min_hand_presence_confidence = 0.5,
+    min_tracking_confidence = 0.5,
+    result_callback = callback
+)
+
+detector = vision.HandLandmarker.create_from_options(options)
+
+# Abrimos la camara web default de la PC
+cap = cv2.VideoCapture(0)
+frame_id = 0
+
+# Bucle principal del programa
 while True:
+    # Leemos un frame del feed de video
     ret, frame = cap.read()
+
+    # La función devuelve false si no hay un frame
     if not ret:
         break
 
+    # Invertimos la imagen verticalmente
     frame = cv2.flip(frame, 1)
-    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    result = hands.process(rgb)
 
-    altura, ancho, _ = frame.shape
-    manos_detectadas = {}
+    # Obtenemos las dimensiones de la imagen (alto-ancho-canales)
+    imagen_alto, imagen_ancho, _ = frame.shape
 
-    if result.multi_hand_landmarks and len(result.multi_hand_landmarks) == 2:
-        for idx, hand_landmarks in enumerate(result.multi_hand_landmarks):
-            hand_label = result.multi_handedness[idx].classification[0].label  # "Left" o "Right"
+    # Creamos una imagen que pueda ser utilizada por mediapipe, la guardamos en color
+    mp_image = mp.Image(image_format = mp.ImageFormat.SRGB, data = frame)
 
-            puntos = {
-                i: (int(hand_landmarks.landmark[i].x * ancho),
-                    int(hand_landmarks.landmark[i].y * altura))
+    # Enviamos el frame al detector, cuando el procesamiento esté listo va a llamar a la función 'callback'
+    detector.detect_async(mp_image, frame_id)
+    frame_id += 1   # Esta variable no se usa pero se debe llevar la cuenta de los frames
+
+    # Calculamos todo en función del último frame procesado
+    # Verificamos que se hayan detectado las dos manos para entrar en el ciclo
+    if ultimo_resultado and ultimo_resultado.hand_landmarks and len(ultimo_resultado.hand_landmarks) == 2:
+        # Creamos un diccionario para usar a la hora de controlar el joystick, cada ciclo se reinicia para poder actuar solo cuando tenemos las dos manos
+        manos_detectadas = {}
+
+        # Ejecutamos una vez por cada mano
+        for nro_mano, hand in enumerate(ultimo_resultado.hand_landmarks):
+            # Guardamos los 21 puntos de referencia para cada mano que procesa la red
+            puntos_referencia = {
+                i: (int(hand[i].x * imagen_ancho), int(hand[i].y * imagen_alto))
                 for i in range(21)
             }
 
             # Dibujar línea entre la muñeca y el pulgar
-            cv2.line(frame, puntos[PUNTO_INICIAL], puntos[PUNTO_FINAL], (0, 255, 255), 2)
+            cv2.line(frame, puntos_referencia[PUNTO_INICIAL], puntos_referencia[PUNTO_FINAL], (0, 255, 255), 2)
 
-            # Calcular e imprimir la distancia
-            distancia_medio_muneca = int(distancia(puntos[PUNTO_INICIAL], puntos[PUNTO_FINAL]))
+            # Calculamos la distancia entre ambos puntos
+            distancia = int(calcular_distancia(puntos_referencia[PUNTO_INICIAL], puntos_referencia[PUNTO_FINAL]))
+
+            # ESTE MÉTODO PARA CALCULAR FUNCIONA BIEN SI NOS ACERCAMOS PERO NO SI NOS ALEJAMOS, REVISAR
             # Si la distancia es mayor que el máximo registrado lo guardamos en la variable
-            if(distancia_medio_muneca > maximaDistancia):
-                maximaDistancia = distancia_medio_muneca
+            if (distancia > maximaDistancia) or (maximaDistancia == -1):
+                maximaDistancia = distancia
             # Si la distancia es menor que el mínimo registrado lo guardamos en la variable
-            elif(distancia_medio_muneca < minimaDistancia):
-                minimaDistancia = distancia_medio_muneca
+            elif (distancia < minimaDistancia) or (minimaDistancia == -1):
+                minimaDistancia = distancia
 
-            cv2.putText(frame, f"{distancia_medio_muneca}px",
-                        ((puntos[PUNTO_INICIAL][0] + puntos[PUNTO_FINAL][0]) // 2, (puntos[PUNTO_INICIAL][1] + puntos[PUNTO_FINAL][1]) // 2),
+            cv2.putText(frame, f"{distancia}px",
+                        ((puntos_referencia[PUNTO_INICIAL][0] + puntos_referencia[PUNTO_FINAL][0]) // 2,
+                         (puntos_referencia[PUNTO_INICIAL][1] + puntos_referencia[PUNTO_FINAL][1]) // 2),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
-            cv2.circle(frame, puntos[PUNTO_INICIAL], 8, (255, 0, 0), -1)  # puntos[0] = Muñeca
-            cv2.circle(frame, puntos[PUNTO_FINAL], 8, (0, 255, 0), -1) # puntos[12] = Punta del dedo medio
+            cv2.circle(frame, puntos_referencia[PUNTO_INICIAL], 8, (255, 0, 0), -1)
+            cv2.circle(frame, puntos_referencia[PUNTO_FINAL], 8, (0, 255, 0), -1)
 
             # Determinamos si la mano está cerrada en función de las distancias máximas y mínimas registradas
             # Mano cerrada si el índice está cerca de la muñeca
-            dist = distancia(puntos[PUNTO_INICIAL], puntos[PUNTO_FINAL])
-            rangoMovimiento = maximaDistancia - minimaDistancia
-            mano_cerrada = dist < minimaDistancia + (MULTIPLICADOR_RANGO * rangoMovimiento)
+            rango = maximaDistancia - minimaDistancia
+            mano_cerrada = distancia < minimaDistancia + (MULTIPLICADOR_RANGO * rango)
 
-            manos_detectadas[hand_label] = {
-                'pos': puntos[PUNTO_INICIAL],
-                'cerrada': mano_cerrada
-            }
-
-            # Dibujar estado
+            mano_etiqueta = "Izquierda" if nro_mano == 0 else "Derecha"
             estado = "CERRADA" if mano_cerrada else "ABIERTA"
-            cv2.putText(frame, f"{hand_label}: {estado}", (puntos[PUNTO_INICIAL][0], puntos[PUNTO_INICIAL][1] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+            
+            # Guardamos las coordenadas de la muñeca y si la mano está cerrada o no
+            manos_detectadas[mano_etiqueta] = {'pos': puntos_referencia[PUNTO_INICIAL], 'cerrada': mano_cerrada}
 
-        # Si ambas manos están presentes, calcular dirección del stick
-        if "Left" in manos_detectadas and "Right" in manos_detectadas:
-            p1 = manos_detectadas["Left"]["pos"]
-            p2 = manos_detectadas["Right"]["pos"]
+            # Escribimos el texto en el frame
+            cv2.putText(frame, f"{mano_etiqueta}: {estado}", (puntos_referencia[PUNTO_INICIAL][0], puntos_referencia[PUNTO_INICIAL][1] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)   
+                
+            
+        # Control de joystick
+        if "Izquierda" in manos_detectadas and "Derecha" in manos_detectadas:
+            punto_1 = manos_detectadas["Izquierda"]["pos"]
+            punto_2 = manos_detectadas["Derecha"]["pos"]
 
-            dx = p2[0] - p1[0]
-            dy = p2[1] - p1[1]
+            # Calculamos y limitamos la pendiente que se forma entre las dos muñecas
+            pendiente_limitada = limitar_pendiente(calcular_pendiente(punto_1, punto_2))
 
-            angulo = math.atan2(dy, dx) * (180 / math.pi)
-            angulo_limitado = limitar(angulo, -40, 40)
+            # Traducimos el valor de la pendiente en un valor del stick entre -32767 y 32767
+            valor_stick_x = int(32767 * (pendiente_limitada / LIMITE_PENDIENTE))
 
-            valor_stick_x = int((angulo_limitado / 40) * 32767)
-
-            # Deadzone
-            if (-6000 < valor_stick_x < 6000):
+            # Aplicamos la deadzone si es necesario
+            if -DEADZONE_STICK < valor_stick_x < DEADZONE_STICK:
                 valor_stick_x = 0
 
-            # Presionar botones si las manos están cerradas
-            # Acelerar
-            if(manos_detectadas["Left"]["cerrada"]) and ((manos_detectadas["Right"]["cerrada"])):
-                gamepad.left_trigger(value=0)
-                gamepad.right_trigger(value=255)
-            
-            # No hacer nada
-            elif (manos_detectadas["Left"]["cerrada"]) or ((manos_detectadas["Right"]["cerrada"])):
-                gamepad.left_trigger(value=0)
-                gamepad.right_trigger(value=0)
+            # Seteamos el valor del stick con el nuevo valor calculado
+            gamepad.left_joystick(x_value = valor_stick_x, y_value = 0)
 
+            # Acelerar
+            if manos_detectadas["Izquierda"]["cerrada"] and manos_detectadas["Derecha"]["cerrada"]:
+                gamepad.left_trigger(value = 0)
+                gamepad.right_trigger(value = 255)
+            # Nada
+            elif manos_detectadas["Izquierda"]["cerrada"] or manos_detectadas["Derecha"]["cerrada"]:
+                gamepad.left_trigger(value = 0)
+                gamepad.right_trigger(value = 0)
             # Frenar
-            elif (not manos_detectadas["Left"]["cerrada"]) or ((not manos_detectadas["Right"]["cerrada"])):
-                gamepad.left_trigger(value=255)
-                gamepad.right_trigger(value=0)
+            else:
+                gamepad.left_trigger(value = 255)
+                gamepad.right_trigger(value = 0)
 
         else:
             valor_stick_x = 0
 
-    else:
-        # No hay dos manos detectadas, ponemos todos los botones en cero
-        valor_stick_x = 0
-        gamepad.left_trigger(value=0)
-        gamepad.right_trigger(value=0)
+        cv2.putText(frame, f"LX: {valor_stick_x}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-    # Enviar valores al gamepad
-    gamepad.left_joystick(x_value=valor_stick_x, y_value=0)
+    else:
+        # No hay manos detectadas
+        gamepad.left_trigger(value = 0)
+        gamepad.right_trigger(value = 0)
+        gamepad.left_joystick(x_value = 0, y_value = 0)
+
+    # Actualizamos el control con los nuevos valores
     gamepad.update()
 
-    # Mostrar valor del stick
-    cv2.putText(frame, f"LX: {valor_stick_x}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-
-    cv2.imshow("Volante + Botones", frame)
-    if cv2.waitKey(1) & 0xFF == 27:  # ESC para salir
+    # Mostramos el frame
+    cv2.imshow("Volante Visión Artificial", frame)
+    
+    # Salimos con la tecla ESC
+    if cv2.waitKey(1) & 0xFF == 27:
         break
 
 cap.release()
