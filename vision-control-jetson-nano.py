@@ -1,68 +1,77 @@
+# Versión del control pensada para ser ejecutada en una Jetson Nano (4GB).
+# Para configurar todo lo necesario seguir la guia en: https://jetson-docs.com/libraries/mediapipe/overview
 import cv2
 import math
-import vgamepad as vg
+import threading
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
+# ===================== Configuración =====================
 PUNTO_INICIAL = 0           # 0 = Muñeca
 PUNTO_FINAL = 12            # 12 = Dedo mayor
 UMBRAL_MANO_CERRADA = -0.02 # Factor para determinar si la mano está cerrada o no
 LIMITE_PENDIENTE = 0.5      # Valor máximo que puede tener la pendiente (tanto positiva como negativa)
 DEADZONE_STICK = 6000       # Deadzone del stick, si el calculo con la pendiente da un valor menor que este se reemplaza por 0
+RESOLUCION_ANCHO = 854      # Ancho de la resolución a la que convertimos el feed de video (disminuir la resolución mejora el rendimiento)
+RESOLUCION_ALTO = 480       # Ancho de la resolución a la que convertimos el feed de video
+
+
+SOURCE = "http://192.168.0.147:4747/video"
 
 # Lista donde se colocan los puntos para los cuales se obtienen las coordenadas
 # Si bien no se puede evitar el que modelo prediga los 21 landmarks
 # Evitamos calcular las coordenadas de estos para después no usarlas
 puntos_utilizados = [PUNTO_INICIAL, PUNTO_FINAL]
 
-# Inicializar gamepad virtual
-gamepad = vg.VX360Gamepad()
-
-# Variable global donde se guarda el último frame procesado
+# Variables globales
 ultimo_resultado = None
+procesando = False
+lock = threading.Lock()
+frame_id = 0
 
 # Medimos la distancia entre dos puntos
-def calcular_distancia(punto_1, punto_2):
-    return math.hypot(punto_2[0] - punto_1[0], punto_2[1] - punto_1[1])
+def calcular_distancia(p1, p2):
+    return math.hypot(p2[0]-p1[0], p2[1]-p1[1])
 
 # Calculamos la pendiente de la recta que se forma al unir dos puntos
-def calcular_pendiente(punto_1, punto_2):
+def calcular_pendiente(p1, p2):
     # Verificamos no estar dividiendo por cero si por alguna razón las muñecas tienen la misma coordenada en X
-    return (punto_2[1] - punto_1[1])/(punto_2[0] - punto_1[0]) if((punto_2[0] - punto_1[0]) != 0) else 0
+    return (p2[1]-p1[1])/(p2[0]-p1[0]) if (p2[0]-p1[0]) != 0 else 0
 
 # Limitamos el valor de la pendiente
-def limitar_pendiente(pendiente):
-    return max(pendiente, -LIMITE_PENDIENTE) if (pendiente < 0) else min(pendiente, LIMITE_PENDIENTE)
+def limitar_pendiente(p):
+    return max(p, -LIMITE_PENDIENTE) if p < 0 else min(p, LIMITE_PENDIENTE)
 
 # Callback que recibe los resultados del procesamiento de las imágenes
 # Devuelve el resultado, la imagen original y el timestamp de la imagen original
 # Guardamos el resultado en la variable 'ultimo_resultado' para usarlo en el loop principal
 def callback(result, output_image, timestamp_ms):
-    global ultimo_resultado
+    global ultimo_resultado, procesando
     ultimo_resultado = result
+    with lock:
+        procesando = False
 
 # Configuración de Mediapipe
 base_options = python.BaseOptions(
-    model_asset_path="hand_landmarker.task"
-    #delegate=python.BaseOptions.Delegate.GPU   # Forzamos a que el modelo de Mediapipe corra en la GPU (Solo soportado en Linux por ahora)
+    model_asset_path="hand_landmarker.task",
+    delegate=python.BaseOptions.Delegate.GPU   # Forzamos a que el modelo de Mediapipe corra en la GPU (Solo soportado en Linux por ahora)
 )
 
 options = vision.HandLandmarkerOptions(
-    base_options = base_options,
-    running_mode = mp.tasks.vision.RunningMode.LIVE_STREAM, # Configuramos modo de video en vivo
+    base_options=base_options,
+    running_mode=mp.tasks.vision.RunningMode.LIVE_STREAM,
     num_hands = 2,
-    min_hand_detection_confidence = 0.5,
-    min_hand_presence_confidence = 0.5,
-    min_tracking_confidence = 0.5,
+    min_hand_detection_confidence = 0.3,
+    min_hand_presence_confidence = 0.3,
+    min_tracking_confidence = 0.3,
     result_callback = callback
 )
 
 detector = vision.HandLandmarker.create_from_options(options)
 
-# Abrimos la camara web default de la PC
-cap = cv2.VideoCapture(0)
-frame_id = 0
+# Abrimos el feed de video desde la fuente indicada (cámara web o URL por ejemplo).
+cap = cv2.VideoCapture(SOURCE)
 
 # Bucle principal del programa
 while True:
@@ -71,7 +80,11 @@ while True:
 
     # La función devuelve false si no hay un frame
     if not ret:
+        print("Error Imagen")
         break
+
+    # Reducimos la resolución de la imagen para mejorar el rendimiento
+    frame = cv2.resize(frame, (RESOLUCION_ANCHO, RESOLUCION_ALTO))
 
     # Invertimos la imagen verticalmente
     frame = cv2.flip(frame, 1)
@@ -80,10 +93,16 @@ while True:
     imagen_alto, imagen_ancho, _ = frame.shape
 
     # Creamos una imagen que pueda ser utilizada por mediapipe, la guardamos en color
-    mp_image = mp.Image(image_format = mp.ImageFormat.SRGB, data = frame)
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
 
-    # Enviamos el frame al detector, cuando el procesamiento esté listo va a llamar a la función 'callback'
-    detector.detect_async(mp_image, frame_id)
+    # Procesar solo si no hay frame en proceso
+    with lock:
+        if not procesando:
+            procesando = True
+            
+            # Enviamos el frame al detector, cuando el procesamiento esté listo va a llamar a la función 'callback'
+            detector.detect_async(mp_image, frame_id)
+
     frame_id += 1   # Esta variable no se usa pero se debe llevar la cuenta de los frames
 
     # Calculamos todo en función del último frame procesado
@@ -97,7 +116,7 @@ while True:
         for nro_mano, (mano_2d, mano_3d) in enumerate(zip(ultimo_resultado.hand_landmarks, ultimo_resultado.hand_world_landmarks)):
             # Guardamos las coordenadas de los puntos de referencia que definimos al inicio del programa
             puntos_referencia = {
-                i: (int(mano_2d[i].x * imagen_ancho), int(mano_2d[i].y * imagen_alto))
+                i: (int(mano_2d[i].x*imagen_ancho), int(mano_2d[i].y*imagen_alto))
                 for i in puntos_utilizados
             }
 
@@ -107,7 +126,7 @@ while True:
 
             mano_etiqueta = "Izquierda" if nro_mano == 1 else "Derecha"
             estado = "CERRADA" if mano_cerrada else "ABIERTA"
-            
+
             # Guardamos las coordenadas de la muñeca y si la mano está cerrada o no
             manos_detectadas[mano_etiqueta] = {'pos': puntos_referencia[PUNTO_INICIAL], 'cerrada': mano_cerrada}
 
@@ -128,8 +147,7 @@ while True:
 
             cv2.circle(frame, puntos_referencia[PUNTO_INICIAL], 8, (255, 0, 0), -1)
             cv2.circle(frame, puntos_referencia[PUNTO_FINAL], 8, (0, 255, 0), -1)
-                
-            
+
         # Control de joystick
         if "Izquierda" in manos_detectadas and "Derecha" in manos_detectadas:
             punto_1 = manos_detectadas["Izquierda"]["pos"]
@@ -144,41 +162,15 @@ while True:
             # Aplicamos la deadzone si es necesario
             if -DEADZONE_STICK < valor_stick_x < DEADZONE_STICK:
                 valor_stick_x = 0
-
-            # Seteamos el valor del stick con el nuevo valor calculado
-            gamepad.left_joystick(x_value = valor_stick_x, y_value = 0)
-
-            # Acelerar
-            if manos_detectadas["Izquierda"]["cerrada"] and manos_detectadas["Derecha"]["cerrada"]:
-                gamepad.left_trigger(value = 0)
-                gamepad.right_trigger(value = 255)
-            # Nada
-            elif manos_detectadas["Izquierda"]["cerrada"] or manos_detectadas["Derecha"]["cerrada"]:
-                gamepad.left_trigger(value = 0)
-                gamepad.right_trigger(value = 0)
-            # Frenar
-            else:
-                gamepad.left_trigger(value = 255)
-                gamepad.right_trigger(value = 0)
-
         else:
             valor_stick_x = 0
 
         # Escribimos en el frame el valor que le corresponde al analógico
-        cv2.putText(frame, f"LX: {valor_stick_x}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-
-    else:
-        # No hay manos detectadas
-        gamepad.left_trigger(value = 0)
-        gamepad.right_trigger(value = 0)
-        gamepad.left_joystick(x_value = 0, y_value = 0)
-
-    # Actualizamos el control con los nuevos valores
-    gamepad.update()
+        cv2.putText(frame, f"LX: {valor_stick_x}", (10,30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
 
     # Mostramos el frame
     cv2.imshow("Volante Vision Artificial", frame)
-    
+
     # Salimos con la tecla ESC
     if cv2.waitKey(1) & 0xFF == 27:
         break
