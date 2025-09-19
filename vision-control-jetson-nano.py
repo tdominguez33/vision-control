@@ -1,5 +1,7 @@
 # Versión del control pensada para ser ejecutada en una Jetson Nano (4GB).
 # Para configurar todo lo necesario seguir la guia en: https://jetson-docs.com/libraries/mediapipe/overview
+# No recomiendo utilizar contenedores de Docker por la latencia que introduce al procesamiento
+
 import cv2
 import math
 import threading
@@ -7,7 +9,6 @@ import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
-# ===================== Configuración =====================
 PUNTO_INICIAL = 0           # 0 = Muñeca
 PUNTO_FINAL = 12            # 12 = Dedo mayor
 UMBRAL_MANO_CERRADA = -0.02 # Factor para determinar si la mano está cerrada o no
@@ -16,7 +17,7 @@ DEADZONE_STICK = 6000       # Deadzone del stick, si el calculo con la pendiente
 RESOLUCION_ANCHO = 854      # Ancho de la resolución a la que convertimos el feed de video (disminuir la resolución mejora el rendimiento)
 RESOLUCION_ALTO = 480       # Ancho de la resolución a la que convertimos el feed de video
 
-
+# Fuente desde la que se obtendrá el video a procesar
 SOURCE = "http://192.168.0.147:4747/video"
 
 # Lista donde se colocan los puntos para los cuales se obtienen las coordenadas
@@ -95,7 +96,7 @@ while True:
     # Creamos una imagen que pueda ser utilizada por mediapipe, la guardamos en color
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
 
-    # Procesar solo si no hay frame en proceso
+    # Se procesa un nuevo frame solo si no estamos procesando otro
     with lock:
         if not procesando:
             procesando = True
