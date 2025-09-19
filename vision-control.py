@@ -165,10 +165,10 @@ while True:
         (len(ultimo_resultado.hand_landmarks) == 1 and len(ultimo_resultado.hand_world_landmarks) == 1 and ultimo_estado['derecha'][1] != -1 and ultimo_estado['izquierda'][1] != -1))):
 
         # Ejecutamos una vez por cada mano
-        for nro_mano, (mano_derechad, mano_3d) in enumerate(zip(ultimo_resultado.hand_landmarks, ultimo_resultado.hand_world_landmarks)):
+        for nro_mano, (mano_derecha, mano_3d) in enumerate(zip(ultimo_resultado.hand_landmarks, ultimo_resultado.hand_world_landmarks)):
             # Guardamos las coordenadas de los puntos de referencia que definimos al inicio del programa
             puntos_referencia = {
-                i: (int(mano_derechad[i].x * imagen_ancho), int(mano_derechad[i].y * imagen_alto))
+                i: (int(mano_derecha[i].x * imagen_ancho), int(mano_derecha[i].y * imagen_alto))
                 for i in puntos_utilizados
             }
 
