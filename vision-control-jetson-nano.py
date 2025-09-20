@@ -1,7 +1,6 @@
-# Versión inicial del control, todas las funciones están contenidas en la misma PC
-# Base sobre la cual luego se construye el programa para la Jetson Nano
-# Puede ser dificil de correr al mismo tiempo que se juega por la carga extra que el procesamiento pone en el CPU
-# Pensado principalmente para Windows porque la libreria de vgamepad es más dificil de hacer correr en Linux
+# Versión del control pensada para ser ejecutada en una Jetson Nano (4GB).
+# Para configurar todo lo necesario seguir la guia en: https://jetson-docs.com/libraries/mediapipe/overview
+# No recomiendo utilizar contenedores de Docker por la latencia que introduce al procesamiento
 
 import cv2
 import math
