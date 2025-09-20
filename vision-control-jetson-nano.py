@@ -14,8 +14,10 @@ import threading
 # Puede abrirse también una URl, por ejemplo: "http://192.168.0.147:4747/video"
 FUENTE_VIDEO = "http://192.168.0.147:4747/video"
 USAR_GPU = True
-CONFIDENCE = 0.5        # Valor para configuraciones del modelo "min_hand_detection_confidence", "min_hand_presence_confidence" y "min_tracking_confidence"
+CONFIDENCE = 0.3        # Valor para configuraciones del modelo "min_hand_detection_confidence", "min_hand_presence_confidence" y "min_tracking_confidence"
 EVITAR_COLA = True      # Forzamos el que no se genere cola de frames permitiendo solo enviar un frame a procesar cuando ya se terminó de procesar el anterior
+RESOLUCION_ANCHO = 854  # Ancho de la resolución a la que convertimos el feed de video (disminuir la resolución mejora el rendimiento)
+RESOLUCION_ALTO = 480   # Ancho de la resolución a la que convertimos el feed de video (disminuir la resolución mejora el rendimiento)
 
 PUNTO_INICIAL = 0           # 0 = Muñeca
 PUNTO_FINAL = 12            # 12 = Dedo mayor
@@ -143,6 +145,9 @@ while True:
     if not ret:
         print("No se pudo inicializar el feed de video")
         break
+    
+    # Reducimos la resolución de la imagen para mejorar el rendimiento
+    frame = cv2.resize(frame, (RESOLUCION_ANCHO, RESOLUCION_ALTO))
 
     # Invertimos la imagen verticalmente
     frame = cv2.flip(frame, 1)
