@@ -44,10 +44,13 @@ ultimo_resultado = None
 # Solo se usa si tenemos el flag 'EVITAR_COLA' activado
 procesando = False
 
+# Lock que se usa para no reemplazar la variable 'ultimo_resultado' cuando ya estamos analizando un resultado
+lock_resultado = threading.Lock()
+
 # Lock que se usa para no acceder a la variable 'procesando' en simultaneo
 # Se puede terminar de procesar un frame y llamar a la función de callback cuando se está modificando la variable
 # Solo se usa si tenemos el flag 'EVITAR_COLA' activado
-lock = threading.Lock()
+lock_cola = threading.Lock()
 
 # Medimos la distancia entre dos puntos
 def calcular_distancia(punto_1, punto_2):
@@ -101,8 +104,10 @@ def control_joystick(punto_izquierda, punto_derecha, mano_izquierda_cerrada, man
 # Guardamos el resultado en la variable 'ultimo_resultado' para usarlo en el loop principal
 def callback(result, output_image, timestamp_ms):
     global ultimo_resultado, procesando
-    ultimo_resultado = result
-    with lock:
+    with lock_resultado:
+        # Guardamos el nuevo resultado
+        ultimo_resultado = result
+    with lock_cola:
         # Habilitamos a procesar un nuevo frame
         procesando = False
 
@@ -162,7 +167,7 @@ while True:
     # Se procesan todos los frames, donde tecnicamente se agregan a una cola y se pueden acumular
     # Se procesan frames solo cuando sabemos que no estamos procesando otro frame, evitando la acumulación
     if EVITAR_COLA:
-        with lock:
+        with lock_cola:
             if not procesando:
                 procesando = True
 
@@ -176,6 +181,9 @@ while True:
     # Creamos un diccionario para usar a la hora de controlar el joystick, cada ciclo se reinicia para que refleje los resultados de la detección
     manos_detectadas = {}
 
+    # Bloqueamos el acceso a la variable del resultado para asegurarnos de hacer todas las comprobaciones y cálculos con el mismo frame
+    lock_resultado.acquire()
+
     # Calculamos todo en función del último frame procesado
     # Verificamos que se hayan detectado las dos manos para entrar en el ciclo inicialmente, una vez que tenemos un historial permitimos detectar solo una
     # Podemos elegir entre 'hand_landmarks' o 'hand_world_landmarks', el primero nos da las coordenadas en la imagen y el otro la distancia en metros hacia el centro de la mano
@@ -183,6 +191,11 @@ while True:
     if (ultimo_resultado and (
         (len(ultimo_resultado.hand_landmarks) == 2 and len(ultimo_resultado.hand_world_landmarks) == 2) or
         (len(ultimo_resultado.hand_landmarks) == 1 and len(ultimo_resultado.hand_world_landmarks) == 1 and ultimo_estado['Derecha'][1] != -1 and ultimo_estado['Izquierda'][1] != -1))):
+
+        # Guardamos el resultado en una variable nueva para utilizar dentro del hilo
+        resultado_analizado = ultimo_resultado
+        # Liberamos el bloqueo para que el nuevo resultado pueda guardarse
+        lock_resultado.release()
 
         # Ejecutamos una vez por cada mano
         for nro_mano, (mano_derecha, mano_3d) in enumerate(zip(ultimo_resultado.hand_landmarks, ultimo_resultado.hand_world_landmarks)):
@@ -217,10 +230,12 @@ while True:
             # Dibujamos las referencias en el frame para esta mano
             frame = dibujar_mano(frame, mano_etiqueta, estado, puntos_referencia[PUNTO_INICIAL], puntos_referencia[PUNTO_FINAL], mano_3d[PUNTO_FINAL].y)
     
-
     # Si no detectamos ninguna mano todos los valores del control serán cero
     else:
         valor_stick_x = 0
+
+    # Liberamos el acceso a la variable del resultado por si no pudimos entrar al ciclo
+    if lock_resultado.locked(): lock_resultado.release()
 
     # Control de joystick
     # Si detectamos ambas manos calculamos la pendiente normalmente

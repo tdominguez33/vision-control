@@ -9,6 +9,7 @@ import vgamepad as vg
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
+import threading
 
 # Fuente desde la cual se va a obtener el feed de video
 # Con 0 simplemente abrimos la camara web default de la PC
@@ -40,6 +41,9 @@ gamepad = vg.VX360Gamepad()
 
 # Variable global donde se guarda el último frame procesado
 ultimo_resultado = None
+
+# Lock que se usa para no reemplazar la variable 'ultimo_resultado' cuando ya estamos analizando un resultado
+lock_resultado = threading.Lock()
 
 # Medimos la distancia entre dos puntos
 def calcular_distancia(punto_1, punto_2):
@@ -112,7 +116,9 @@ def control_joystick(punto_izquierda, punto_derecha, mano_izquierda_cerrada, man
 # Guardamos el resultado en la variable 'ultimo_resultado' para usarlo en el loop principal
 def callback(result, output_image, timestamp_ms):
     global ultimo_resultado
-    ultimo_resultado = result
+    with lock_resultado:
+        # Guardamos el nuevo resultado
+        ultimo_resultado = result
 
 # Configuración de Mediapipe
 # Elegimos si queremos usar o no la GPU para acelerar el procesamiento
@@ -170,6 +176,9 @@ while True:
     # Creamos un diccionario para usar a la hora de controlar el joystick, cada ciclo se reinicia para que refleje los resultados de la detección
     manos_detectadas = {}
 
+    # Bloqueamos el acceso a la variable del resultado para asegurarnos de hacer todas las comprobaciones y cálculos con el mismo frame
+    lock_resultado.acquire()
+
     # Calculamos todo en función del último frame procesado
     # Verificamos que se hayan detectado las dos manos para entrar en el ciclo inicialmente, una vez que tenemos un historial permitimos detectar solo una
     # Podemos elegir entre 'hand_landmarks' o 'hand_world_landmarks', el primero nos da las coordenadas en la imagen y el otro la distancia en metros hacia el centro de la mano
@@ -177,6 +186,11 @@ while True:
     if (ultimo_resultado and (
         (len(ultimo_resultado.hand_landmarks) == 2 and len(ultimo_resultado.hand_world_landmarks) == 2) or
         (len(ultimo_resultado.hand_landmarks) == 1 and len(ultimo_resultado.hand_world_landmarks) == 1 and ultimo_estado['Derecha'][1] != -1 and ultimo_estado['Izquierda'][1] != -1))):
+
+        # Guardamos el resultado en una variable nueva para utilizar dentro del hilo
+        resultado_analizado = ultimo_resultado
+        # Liberamos el bloqueo para que el nuevo resultado pueda guardarse
+        lock_resultado.release()
 
         # Ejecutamos una vez por cada mano
         for nro_mano, (mano_derecha, mano_3d) in enumerate(zip(ultimo_resultado.hand_landmarks, ultimo_resultado.hand_world_landmarks)):
@@ -209,8 +223,7 @@ while True:
                 ultimo_estado_ambas_manos[mano_etiqueta][1] = mano_cerrada
 
             # Dibujamos las referencias en el frame para esta mano
-            frame = dibujar_mano(frame, mano_etiqueta, estado, puntos_referencia[PUNTO_INICIAL], puntos_referencia[PUNTO_FINAL], mano_3d[PUNTO_FINAL].y)
-    
+            frame = dibujar_mano(frame, mano_etiqueta, estado, puntos_referencia[PUNTO_INICIAL], puntos_referencia[PUNTO_FINAL], mano_3d[PUNTO_FINAL].y)  
 
     # Si no detectamos ninguna mano todos los valores del control serán cero
     else:
@@ -218,6 +231,9 @@ while True:
         gamepad.left_trigger(value = 0)
         gamepad.right_trigger(value = 0)
         gamepad.left_joystick(x_value = 0, y_value = 0)
+
+    # Liberamos el acceso a la variable del resultado por si no pudimos entrar al ciclo
+    if lock_resultado.locked(): lock_resultado.release()
 
     # Control de joystick
     # Si detectamos ambas manos calculamos la pendiente normalmente
