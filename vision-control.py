@@ -193,7 +193,7 @@ while True:
         lock_resultado.release()
 
         # Ejecutamos una vez por cada mano
-        for nro_mano, (mano_derecha, mano_3d) in enumerate(zip(ultimo_resultado.hand_landmarks, ultimo_resultado.hand_world_landmarks)):
+        for nro_mano, (mano_derecha, mano_3d) in enumerate(zip(resultado_analizado.hand_landmarks, resultado_analizado.hand_world_landmarks)):
             # Guardamos las coordenadas de los puntos de referencia que definimos al inicio del programa
             puntos_referencia = {
                 i: (int(mano_derecha[i].x * imagen_ancho), int(mano_derecha[i].y * imagen_alto))
@@ -206,7 +206,7 @@ while True:
 
             # El modelo también puede estimar de que mano se trata con el atributo "handedness"
             # Invertimos la selección porque el feed de video fue invertido antes
-            mano_etiqueta = 'Izquierda' if ultimo_resultado.handedness[nro_mano][0].category_name == 'Right' else 'Derecha'
+            mano_etiqueta = 'Izquierda' if resultado_analizado.handedness[nro_mano][0].category_name == 'Right' else 'Derecha'
             estado = 'CERRADA' if mano_cerrada else 'ABIERTA'
             
             # Guardamos las coordenadas de la muñeca y si la mano está cerrada o no
@@ -217,7 +217,7 @@ while True:
             ultimo_estado[mano_etiqueta][1] = mano_cerrada
 
             # Solo se ejecuta cuando estamos detectando ambas manos
-            if(len(ultimo_resultado.hand_landmarks) == 2):
+            if(len(resultado_analizado.hand_landmarks) == 2):
                 # Actualizamos el valor en el diccionario
                 ultimo_estado_ambas_manos[mano_etiqueta][0] = puntos_referencia[PUNTO_INICIAL]
                 ultimo_estado_ambas_manos[mano_etiqueta][1] = mano_cerrada
