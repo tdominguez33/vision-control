@@ -232,10 +232,12 @@ while True:
     
     # Si no detectamos ninguna mano todos los valores del control serán cero
     else:
+        # Liberamos el acceso a la variable del resultado si no pudimos entrar al ciclo
+        lock_resultado.release()
+
         valor_stick_x = 0
 
-    # Liberamos el acceso a la variable del resultado por si no pudimos entrar al ciclo
-    if lock_resultado.locked(): lock_resultado.release()
+    
 
     # Control de joystick
     # Si detectamos ambas manos calculamos la pendiente normalmente
