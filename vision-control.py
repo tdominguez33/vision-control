@@ -193,10 +193,10 @@ while True:
         lock_resultado.release()
 
         # Ejecutamos una vez por cada mano
-        for nro_mano, (mano_derecha, mano_3d) in enumerate(zip(resultado_analizado.hand_landmarks, resultado_analizado.hand_world_landmarks)):
+        for nro_mano, (mano_2d, mano_3d) in enumerate(zip(resultado_analizado.hand_landmarks, resultado_analizado.hand_world_landmarks)):
             # Guardamos las coordenadas de los puntos de referencia que definimos al inicio del programa
             puntos_referencia = {
-                i: (int(mano_derecha[i].x * imagen_ancho), int(mano_derecha[i].y * imagen_alto))
+                i: (int(mano_2d[i].x * imagen_ancho), int(mano_2d[i].y * imagen_alto))
                 for i in puntos_utilizados
             }
 

@@ -85,7 +85,7 @@ def dibujar_mano(frame, mano_etiqueta, estado, punto_inicial, punto_final, dista
     return frame
 
 # Actualiza los valores del joystick dependiendo del estado de las manos
-def control_joystick(punto_izquierda, punto_derecha, mano_izquierda_cerrada, mano_derecha_cerrada):
+def control_joystick(punto_izquierda, punto_derecha):
     
     # Calculamos y limitamos la pendiente que se forma entre las dos muñecas
     pendiente_limitada = limitar_pendiente(calcular_pendiente(punto_izquierda, punto_derecha))
@@ -198,10 +198,10 @@ while True:
         lock_resultado.release()
 
         # Ejecutamos una vez por cada mano
-        for nro_mano, (mano_derecha, mano_3d) in enumerate(zip(resultado_analizado.hand_landmarks, resultado_analizado.hand_world_landmarks)):
+        for nro_mano, (mano_2d, mano_3d) in enumerate(zip(resultado_analizado.hand_landmarks, resultado_analizado.hand_world_landmarks)):
             # Guardamos las coordenadas de los puntos de referencia que definimos al inicio del programa
             puntos_referencia = {
-                i: (int(mano_derecha[i].x * imagen_ancho), int(mano_derecha[i].y * imagen_alto))
+                i: (int(mano_2d[i].x * imagen_ancho), int(mano_2d[i].y * imagen_alto))
                 for i in puntos_utilizados
             }
 
@@ -289,7 +289,7 @@ while True:
         cv2.circle(frame, punto_izquierda, 8, AZUL, -1)
 
         # Actualizamos los valores del control emulado
-        valor_stick_x = control_joystick(punto_izquierda, punto_derecha, mano_izquierda_cerrada, mano_derecha_cerrada)
+        valor_stick_x = control_joystick(punto_izquierda, punto_derecha)
 
     
     # Estamos detectando alguna mano
