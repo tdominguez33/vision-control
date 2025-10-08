@@ -8,6 +8,7 @@ import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 import threading
+import socket
 
 # Fuente desde la cual se va a obtener el feed de video
 # Con 0 simplemente abrimos la camara web default de la PC
@@ -24,6 +25,13 @@ PUNTO_FINAL = 12            # 12 = Dedo mayor
 UMBRAL_MANO_CERRADA = -0.02 # Factor para determinar si la mano está cerrada o no
 LIMITE_PENDIENTE = 0.5      # Valor máximo que puede tener la pendiente (tanto positiva como negativa)
 DEADZONE_STICK = 6000       # Deadzone del stick, si el calculo con la pendiente da un valor menor que este se reemplaza por 0
+
+# Configuraciones para la transmisión de los datos vía sockets
+IP_PC = "192.168.1.23"
+PUERTO_PC = 5555
+
+# Creamos el socket UDP (SOCK_DGRAM)
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 # Colores para OpenCV (Azul, Verde, Rojo)
 ROJO = (0, 0, 255)
@@ -51,6 +59,14 @@ lock_resultado = threading.Lock()
 # Se puede terminar de procesar un frame y llamar a la función de callback cuando se está modificando la variable
 # Solo se usa si tenemos el flag 'EVITAR_COLA' activado
 lock_cola = threading.Lock()
+
+# Enviamos los datos mediante un socket
+def enviar_datos(x_value, mano_izquierda_cerrada, mano_derecha_cerrada):
+    # Creamos el mensaje, son los valores separados por comas
+    mensaje = f"{x_value},{mano_izquierda_cerrada},{mano_derecha_cerrada}"
+    
+    # Lo enviamos a la PC indicada
+    sock.sendto(mensaje.encode(), (IP_PC, PUERTO_PC))
 
 # Medimos la distancia entre dos puntos
 def calcular_distancia(punto_1, punto_2):
@@ -85,7 +101,7 @@ def dibujar_mano(frame, mano_etiqueta, estado, punto_inicial, punto_final, dista
     return frame
 
 # Actualiza los valores del joystick dependiendo del estado de las manos
-def control_joystick(punto_izquierda, punto_derecha):
+def actualizar_joystick(punto_izquierda, punto_derecha, mano_izquierda_cerrada, mano_derecha_cerrada):
     
     # Calculamos y limitamos la pendiente que se forma entre las dos muñecas
     pendiente_limitada = limitar_pendiente(calcular_pendiente(punto_izquierda, punto_derecha))
@@ -97,6 +113,10 @@ def control_joystick(punto_izquierda, punto_derecha):
     if -DEADZONE_STICK < valor_stick_x < DEADZONE_STICK:
         valor_stick_x = 0
 
+    # Enviamos los valores por el socket
+    enviar_datos(valor_stick_x, mano_izquierda_cerrada, mano_derecha_cerrada)
+
+    # Devolvemos el valor resultante del stick para imprimirlo en el frame
     return valor_stick_x
 
 # Callback que recibe los resultados del procesamiento de las imágenes
@@ -237,8 +257,6 @@ while True:
 
         valor_stick_x = 0
 
-    
-
     # Control de joystick
     # Si detectamos ambas manos calculamos la pendiente normalmente
     if 'Izquierda' in manos_detectadas and 'Derecha' in manos_detectadas:
@@ -249,7 +267,7 @@ while True:
         mano_derecha_cerrada = manos_detectadas["Derecha"]['cerrada']
 
         # Actualizamos los valores del control emulado
-        valor_stick_x = control_joystick(punto_izquierda, punto_derecha, mano_izquierda_cerrada, mano_derecha_cerrada)
+        valor_stick_x = actualizar_joystick(punto_izquierda, punto_derecha, mano_izquierda_cerrada, mano_derecha_cerrada)
     
     # Detectamos solamente a la mano izquierda, tenemos que intentar predecir el valor de la otra mano
     elif 'Izquierda' in manos_detectadas:
@@ -269,7 +287,7 @@ while True:
         cv2.circle(frame, punto_derecha, 8, AZUL, -1)
 
         # Actualizamos los valores del control emulado
-        valor_stick_x = control_joystick(punto_izquierda, punto_derecha, mano_izquierda_cerrada, mano_derecha_cerrada)
+        valor_stick_x = actualizar_joystick(punto_izquierda, punto_derecha, mano_izquierda_cerrada, mano_derecha_cerrada)
 
     # Detectamos solamente a la mano derecha, tenemos que intentar predecir el valor de la otra mano
     elif 'Derecha' in manos_detectadas:
@@ -289,8 +307,7 @@ while True:
         cv2.circle(frame, punto_izquierda, 8, AZUL, -1)
 
         # Actualizamos los valores del control emulado
-        valor_stick_x = control_joystick(punto_izquierda, punto_derecha)
-
+        valor_stick_x = actualizar_joystick(punto_izquierda, punto_derecha)
     
     # Estamos detectando alguna mano
     if 'Izquierda' in manos_detectadas or 'Derecha' in manos_detectadas:
