@@ -8,8 +8,7 @@ import vgamepad as vg
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 # Escuchamos en el puerto 5555 (Debe coincidir con el puerto en el programa de la Jetson Nano)
-sock.bind("0.0.0.0", 5555)
-
+sock.bind(("0.0.0.0", 5555))
 # Creamos el gamepad virtual
 gamepad = vg.VX360Gamepad()
 

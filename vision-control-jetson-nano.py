@@ -307,7 +307,7 @@ while True:
         cv2.circle(frame, punto_izquierda, 8, AZUL, -1)
 
         # Actualizamos los valores del control emulado
-        valor_stick_x = actualizar_joystick(punto_izquierda, punto_derecha)
+        valor_stick_x = actualizar_joystick(punto_izquierda, punto_derecha, mano_izquierda_cerrada, mano_derecha_cerrada)
     
     # Estamos detectando alguna mano
     if 'Izquierda' in manos_detectadas or 'Derecha' in manos_detectadas:
