@@ -13,8 +13,8 @@ import socket
 # Fuente desde la cual se va a obtener el feed de video
 # Con 0 simplemente abrimos la camara web default de la PC
 # Puede abrirse también una URl, por ejemplo: "http://192.168.0.147:4747/video"
-FUENTE_VIDEO = "http://192.168.0.147:4747/video"
-USAR_GPU = True
+FUENTE_VIDEO = "http://192.168.0.138:4747/video"
+USAR_GPU = False
 CONFIDENCE = 0.3        # Valor para configuraciones del modelo "min_hand_detection_confidence", "min_hand_presence_confidence" y "min_tracking_confidence"
 EVITAR_COLA = True      # Forzamos el que no se genere cola de frames permitiendo solo enviar un frame a procesar cuando ya se terminó de procesar el anterior
 RESOLUCION_ANCHO = 854  # Ancho de la resolución a la que convertimos el feed de video (disminuir la resolución mejora el rendimiento)
@@ -27,8 +27,9 @@ LIMITE_PENDIENTE = 0.5      # Valor máximo que puede tener la pendiente (tanto 
 DEADZONE_STICK = 6000       # Deadzone del stick, si el calculo con la pendiente da un valor menor que este se reemplaza por 0
 
 # Configuraciones para la transmisión de los datos vía sockets
-IP_PC = "192.168.1.23"
+IP_PC = "192.168.0.37"     # IP de la PC donde se ejecuta el receptor
 PUERTO_PC = 5555
+DIFERENCIA_STICK = 300  # Que tanto debe variar el stick para enviar un paquete nuevo
 
 # Creamos el socket UDP (SOCK_DGRAM)
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -48,6 +49,11 @@ puntos_utilizados = [PUNTO_INICIAL, PUNTO_FINAL]
 # Variable global donde se guarda el último frame procesado
 ultimo_resultado = None
 
+# Variables globales donde se registra el contenido del último paquete enviado vía socket
+ultimo_stick_enviado = -1
+ultimo_mano_izquierda_cerrada = -1
+ultimo_mano_derecha_cerrada = -1
+
 # Variable que se usa para evitar que se forme una cola de frames y se retrase el video
 # Solo se usa si tenemos el flag 'EVITAR_COLA' activado
 procesando = False
@@ -61,12 +67,23 @@ lock_resultado = threading.Lock()
 lock_cola = threading.Lock()
 
 # Enviamos los datos mediante un socket
+# La función verifica que no se estén mandando datos repetidos
 def enviar_datos(x_value, mano_izquierda_cerrada, mano_derecha_cerrada):
-    # Creamos el mensaje, son los valores separados por comas
-    mensaje = f"{x_value},{mano_izquierda_cerrada},{mano_derecha_cerrada}"
-    
-    # Lo enviamos a la PC indicada
-    sock.sendto(mensaje.encode(), (IP_PC, PUERTO_PC))
+    global ultimo_stick_enviado, ultimo_mano_izquierda_cerrada, ultimo_mano_derecha_cerrada
+
+    # Verificamos que no estemos enviando valores repetidos
+    # En el caso de stick esperamos que varie una cierta cantidad antes de enviar un paquete nuevo
+    if(abs(ultimo_stick_enviado - valor_stick_x) >= DIFERENCIA_STICK) or (ultimo_mano_izquierda_cerrada != mano_izquierda_cerrada) or (ultimo_mano_derecha_cerrada != mano_derecha_cerrada):
+        # Creamos el mensaje, son los valores separados por comas
+        mensaje = f"{x_value},{mano_izquierda_cerrada},{mano_derecha_cerrada}"
+        
+        # Lo enviamos a la PC indicada
+        sock.sendto(mensaje.encode(), (IP_PC, PUERTO_PC))
+
+        # Actualizamos las variables para verificar en los siguientes pasos
+        ultimo_stick_enviado = valor_stick_x
+        ultimo_mano_izquierda_cerrada = mano_izquierda_cerrada
+        ultimo_mano_derecha_cerrada = mano_derecha_cerrada
 
 # Medimos la distancia entre dos puntos
 def calcular_distancia(punto_1, punto_2):
@@ -114,6 +131,7 @@ def actualizar_joystick(punto_izquierda, punto_derecha, mano_izquierda_cerrada, 
         valor_stick_x = 0
 
     # Enviamos los valores por el socket
+    # Esta función ya verifica que no se repitan los paquetes
     enviar_datos(valor_stick_x, mano_izquierda_cerrada, mano_derecha_cerrada)
 
     # Devolvemos el valor resultante del stick para imprimirlo en el frame
@@ -256,6 +274,9 @@ while True:
         lock_resultado.release()
 
         valor_stick_x = 0
+        
+        # Enviamos un paquete neutro, es decir, que es equivalente a no hacer nada
+        enviar_datos(0, True, False)
 
     # Control de joystick
     # Si detectamos ambas manos calculamos la pendiente normalmente

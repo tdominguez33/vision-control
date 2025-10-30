@@ -9,6 +9,7 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 # Escuchamos en el puerto 5555 (Debe coincidir con el puerto en el programa de la Jetson Nano)
 sock.bind(("0.0.0.0", 5555))
+
 # Creamos el gamepad virtual
 gamepad = vg.VX360Gamepad()
 
@@ -19,8 +20,13 @@ while True:
     print("Datos recibidos:", data.decode().strip())
 
     try:
+        # Separamos los valores con las comas
         stick_str, izquierda_str, derecha_str = data.decode().strip().split(',')
+        
+        # Valor del stick
         valor_stick_x = int(stick_str)
+        
+        # Verificamos que el texto recibido sea 'True' o 'False' para definir el valor
         mano_izquierda_cerrada = izquierda_str == 'True'
         mano_derecha_cerrada = derecha_str == 'True'
     except Exception:
@@ -44,4 +50,5 @@ while True:
         gamepad.left_trigger(value=255)
         gamepad.right_trigger(value=0)
 
+    # Actualizamos el gamepad con los valores nuevos
     gamepad.update()
