@@ -14,7 +14,7 @@ import socket
 # Con 0 simplemente abrimos la camara web default de la PC
 # Puede abrirse también una URl, por ejemplo: "http://192.168.0.147:4747/video"
 FUENTE_VIDEO = "http://192.168.0.138:4747/video"
-USAR_GPU = False
+USAR_GPU = True
 CONFIDENCE = 0.3        # Valor para configuraciones del modelo "min_hand_detection_confidence", "min_hand_presence_confidence" y "min_tracking_confidence"
 EVITAR_COLA = True      # Forzamos el que no se genere cola de frames permitiendo solo enviar un frame a procesar cuando ya se terminó de procesar el anterior
 RESOLUCION_ANCHO = 854  # Ancho de la resolución a la que convertimos el feed de video (disminuir la resolución mejora el rendimiento)
@@ -27,7 +27,7 @@ LIMITE_PENDIENTE = 0.5      # Valor máximo que puede tener la pendiente (tanto 
 DEADZONE_STICK = 6000       # Deadzone del stick, si el calculo con la pendiente da un valor menor que este se reemplaza por 0
 
 # Configuraciones para la transmisión de los datos vía sockets
-IP_PC = "192.168.0.37"     # IP de la PC donde se ejecuta el receptor
+IP_PC = "192.168.0.37"      # IP de la PC donde se ejecuta el receptor
 PUERTO_PC = 5555
 DIFERENCIA_STICK = 300  # Que tanto debe variar el stick para enviar un paquete nuevo
 
